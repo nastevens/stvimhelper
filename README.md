@@ -20,6 +20,8 @@ pipx and the Plug `do` command:
 Plug 'nastevens/stvimhelper', { 'do': 'pipx install --force .', 'for': 'vimwiki' }
 ```
 
+With that inserting a link from the clipboard is bound to <C-L> in insert mode.
+
 ## License
 
 Copyright (c) 2021, Nick Stevens <nick@bitcurry.com>
