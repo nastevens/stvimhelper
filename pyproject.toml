@@ -1,9 +1,9 @@
 [tool.poetry]
 name = "stvimhelper"
 version = "0.1.0"
-description = "Vim helper scripts for SmartThings tools"
+description = "Vimwiki helper script for my SmartThings tools"
 authors = ["Nick Stevens <nick@bitcurry.com>"]
-license = "MIT"
+license = "Apache-2.0 OR MIT"
 
 [tool.poetry.dependencies]
 python = "^3.8"

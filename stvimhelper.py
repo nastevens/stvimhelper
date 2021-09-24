@@ -1,3 +1,11 @@
+# Copyright (c) 2021, Nick Stevens <nick@bitcurry.com>
+#
+# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+# http://www.apache.org/license/LICENSE-2.0> or the MIT license
+# <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+# option. This file may not be copied, modified, or distributed
+# except according to those terms.
+
 from atlassian import Confluence as ConfluenceApi, Jira as JiraApi
 from dataclasses import dataclass
 from github import Github as GithubApi
@@ -9,6 +17,9 @@ import re
 
 
 class QueryHandler:
+    """
+    Decorator class to collect and iterate handlers
+    """
     _handlers: Set[Any] = set()
 
     def __call__(self, cls):
@@ -27,6 +38,9 @@ query_handler = QueryHandler()
 
 
 class ServiceMatch:
+    """
+    Abstract class for checking that a query matches a given host location
+    """
     url: str
 
     @classmethod
@@ -38,6 +52,8 @@ class ServiceMatch:
         return False
 
 
+# --- Atlassian services ---
+
 class AtlassianService(ServiceMatch):
     url = "https://smartthings.atlassian.net"
 
@@ -46,19 +62,32 @@ class AtlassianService(ServiceMatch):
         self.username = os.environ["ATLASSIAN_ID"]
         self.password = os.environ["ATLASSIAN_TOKEN"]
 
+
+class ConfluenceService(AtlassianService):
     @property
     def api(self):
         return ConfluenceApi(
             url=self.url,
-            username=self..username,
-            password=self..password,
+            username=self.username,
+            password=self.password,
+            cloud=True,
+        )
+
+
+class JiraService(AtlassianService):
+    @property
+    def api(self):
+        return JiraApi(
+            url=self.url,
+            username=self.username,
+            password=self.password,
             cloud=True,
         )
 
 
 @query_handler
 class Confluence:
-    service: Type[ServiceMatch] = AtlassianService
+    service: Type[ServiceMatch] = ConfluenceService
 
     @classmethod
     def can_handle(cls, query) -> bool:
@@ -79,21 +108,24 @@ class Confluence:
         self.page = api.get_page_by_id(self.page_id)
         self.query = query
 
+    @property
     def link(self) -> str:
         base = self.page["_links"]["base"]
         webui = self.page["_links"]["webui"]
         return base + webui
 
+    @property
     def title(self) -> str:
         return self.page["title"]
 
+    @property
     def review(self) -> str:
-        return f"[[{self.link()}|Confluence >> {self.title()}]]"
+        return f"[[{self.link}|Confluence >> {self.title}]]"
 
 
 @query_handler
 class Jira:
-    service: Type[ServiceMatch] = AtlassianService
+    service: Type[ServiceMatch] = JiraService
 
     @classmethod
     def can_handle(cls, query) -> bool:
@@ -118,14 +150,20 @@ class Jira:
         self.issue = api.issue(self.issue_key)
         self.query = query
 
+    @property
     def link(self) -> str:
         return f"{self.service.url}/browse/{self.issue_key}"
 
+    @property
     def summary(self) -> str:
         return self.issue["fields"]["summary"]
 
+    @property
     def review(self) -> str:
-        return f"[[{self.link()}|{self.issue_key} >> {self.summary()}]]"
+        return f"[[{self.link}|{self.issue_key} >> {self.summary}]]"
+
+
+# --- Github services
 
 
 class GithubService(ServiceMatch):
@@ -155,18 +193,29 @@ class EcodesamsungService(ServiceMatch):
 
 
 @dataclass
-class PrInfo:
+class GithubInfo:
+    """
+    Decomposed Github link, i.e. github.com/<org>/<repo>/{pull,issues}/<ident>
+    """
     org: str
-    repo_name: str
-    prno: int
+    name: str
+    ident: int
 
     @property
     def repo(self):
-        return f"{self.org}/{self.repo_name}"
+        return f"{self.org}/{self.name}"
 
+
+class PrInfo(GithubInfo):
     @property
     def path(self):
-        return f"/{self.org}/{self.repo_name}/pull/{self.prno}"
+        return f"/{self.org}/{self.name}/pull/{self.ident}"
+
+
+class IssueInfo(GithubInfo):
+    @property
+    def path(self):
+        return f"/{self.org}/{self.name}/issues/{self.ident}"
 
 
 class PullRequest:
@@ -184,27 +233,73 @@ class PullRequest:
             if match:
                 return PrInfo(
                     org=match.group(1),
-                    repo_name=match.group(2),
-                    prno=int(match.group(3)),
+                    name=match.group(2),
+                    ident=int(match.group(3)),
                 )
         return None
 
     def __init__(self, query):
         api = self.service().api
         self.pr_info = self.get_pr_info(query)
-        self.pr = api.get_repo(self.pr_info.repo).get_pull(self.pr_info.prno)
+        self.pr = api.get_repo(self.pr_info.repo).get_pull(self.pr_info.ident)
         self.query = query
 
+    @property
     def link(self) -> str:
         return f"{self.service.url}{self.pr_info.path}"
 
+    @property
     def title(self) -> str:
         return self.pr.title
 
+    @property
     def review(self) -> str:
         return (
-            f"[[{self.link()}|{self.pr_info.repo_name} "
-            f"#{self.pr_info.prno} >> {self.title()}]]"
+            f"[[{self.link}|{self.pr_info.name} "
+            f"#{self.pr_info.ident} >> {self.title}]]"
+        )
+
+
+class Issue:
+    service: Type[ServiceMatch]
+
+    @classmethod
+    def can_handle(cls, query) -> bool:
+        return bool(cls.get_issue_info(query))
+
+    @classmethod
+    def get_issue_info(cls, query) -> Optional[IssueInfo]:
+        path = urlparse(query).path
+        if cls.service.url_matches(query):
+            match = re.match(r"/([^/]+)/([^/]+)/issues/(\d+)", path)
+            if match:
+                return IssueInfo(
+                    org=match.group(1),
+                    name=match.group(2),
+                    ident=int(match.group(3)),
+                )
+        return None
+
+    def __init__(self, query):
+        api = self.service().api
+        self.issue_info = self.get_issue_info(query)
+        self.issue = \
+            api.get_repo(self.issue_info.repo).get_issue(self.issue_info.ident)
+        self.query = query
+
+    @property
+    def link(self) -> str:
+        return self.issue.html_url
+
+    @property
+    def title(self) -> str:
+        return self.issue.title
+
+    @property
+    def review(self) -> str:
+        return (
+            f"[[{self.link}|{self.issue_info.name} "
+            f"#{self.issue_info.ident} >> {self.title}]]"
         )
 
 
@@ -218,40 +313,14 @@ class EcodesamsungPullRequest(PullRequest):
     service = EcodesamsungService
 
 
-@dataclass
-class IssueInfo:
-    org: str
-    repo_name: str
-    prno: int
-
-    @property
-    def repo(self):
-        return f"{self.org}/{self.repo_name}"
-
-    @property
-    def path(self):
-        return f"/{self.org}/{self.repo_name}/pull/{self.prno}"
-
-class Issue:
-    service: Type[ServiceMatch]
-
-    @classmethod
-    def can_handle(cls, query) -> bool:
-        return bool(cls.get_issue_info(query))
-
-    @classmethod
-    def get_issue_info(cls, query) -> Optional[IssueInfo]:
-        pass
+@query_handler
+class GithubIssue(Issue):
+    service = GithubService
 
 
-# @query_handler
-# class GithubIssue(Issue):
-#     service = GithubService
-
-
-# @query_handler
-# class EcodesamsungIssue(Issue):
-#     service = EcodesamsungService
+@query_handler
+class EcodesamsungIssue(Issue):
+    service = EcodesamsungService
 
 
 @click.group()
@@ -264,4 +333,4 @@ def cli():
 def review(query):
     handler = QueryHandler.find_handler(query)
     if handler:
-        print(handler(query).review())
+        print(handler(query).review)
