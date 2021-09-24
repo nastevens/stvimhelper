@@ -9,6 +9,7 @@ license = "MIT"
 python = "^3.8"
 atlassian-python-api = "^3.14.0"
 click = "^8.0.1"
+PyGithub = "^1.55"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.910"
